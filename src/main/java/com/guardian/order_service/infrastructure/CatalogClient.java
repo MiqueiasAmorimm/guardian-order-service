@@ -1,7 +1,10 @@
 package com.guardian.order_service.infrastructure;
 
+import com.guardian.order_service.domain.exception.CatalogUnavailableException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import java.util.UUID;
 
@@ -32,9 +35,13 @@ public class CatalogClient {
                         catalogServiceUrl + "/products/" + productId,
                         ProductInfo.class
                 );
-            } catch (Exception e) {
+            } catch (HttpClientErrorException.NotFound e) {
                 throw new IllegalArgumentException("Product not found: " + productId);
+            } catch (RestClientException e) {
+                throw new CatalogUnavailableException("Catalog service unavailable", e);
             }
+
+
 
         }
 }

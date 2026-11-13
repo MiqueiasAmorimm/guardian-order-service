@@ -1,5 +1,6 @@
 package com.guardian.order_service.web.exception;
 
+import com.guardian.order_service.domain.exception.CatalogUnavailableException;
 import com.guardian.order_service.domain.exception.ResourceNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -28,5 +29,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<String> handleResourceNotFound(ResourceNotFoundException ex) {
         return ResponseEntity.status(404).body(ex.getMessage());
+    }
+    @ExceptionHandler(CatalogUnavailableException.class)
+    public ResponseEntity<String> handleCatalogUnavailable(CatalogUnavailableException ex) {
+        return ResponseEntity.status(503).body(ex.getMessage());
     }
 }
