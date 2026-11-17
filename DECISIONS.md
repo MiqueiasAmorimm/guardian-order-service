@@ -27,7 +27,7 @@ Each microservice owns its own database. If one database goes down, only that se
 ## RestTemplate for inter-service communication
 Synchronous HTTP communication with catalog-service, used to validate that a product exists and to retrieve its price before creating an order. A synchronous call fits here because the order cannot be created without this answer. Asynchronous communication with payment-service goes through Kafka, so the two mechanisms coexist.
 
-Trade-off: when catalog-service is down, `CatalogClient` treats the failure like a missing product, so `POST /orders` answers 400 "Product not found" instead of a service-unavailable error. Separating the two cases is on the list of improvements.
+Trade-off: when catalog-service is down, the failure is reported as 503 and no longer as a missing product (see "Telling Product Not Found Apart from Catalog Unavailable"). The `RestTemplate` still has no timeouts, so a catalog-service that hangs instead of being down can block requests, and the call still runs inside the `@Transactional` method of `CreateOrderUseCase`.
 
 ## ResourceNotFoundException returns 404
 Custom exception that extends RuntimeException. Used when a resource does not exist — returns 404 Not Found instead of the generic 400 Bad Request.
@@ -96,3 +96,11 @@ As in payment-service, the event is a local copy (`PaymentApprovedEvent`) instea
 Kafka may deliver the same message more than once, so the use case ignores an order that is already `APPROVED` and logs a warning instead of failing. Considered making `UpdateOrderStatusUseCase` ignore a repeated status, but it also serves `PATCH /orders/{id}/status`, and changing it would silently change that API. A separate `ApproveOrderUseCase`, named after the business action and not after Kafka, keeps the endpoint untouched and could be called from other places later.
 
 Trade-offs: an old order still in `CREATED` that receives an approval is refused by the state machine, the error is logged, and the consumer keeps reading the next messages. An approval for an order that does not exist throws `ResourceNotFoundException`, which also ends up as an error in the consumer. There is no dead-letter topic, so a valid message that keeps failing is not stored anywhere for reprocessing. Field names are kept in sync by hand, and there is no contract test. The two paths of `ApproveOrderUseCase` (already approved, and awaiting payment) have unit tests with a mock repository; the consumer itself has no test, and the repeated message was not exercised against a real Kafka.
+
+## Telling "Product Not Found" Apart from "Catalog Unavailable"
+
+`CatalogClient.getProduct` had a single `catch (Exception e)` that turned every failure into `IllegalArgumentException("Product not found")`, which the handler answered with 400. With catalog-service stopped, `POST /orders` returned 400 "Product not found", which is misleading: the product may exist, the order-service just could not ask. It was found by stopping the catalog and calling the endpoint.
+
+Now there are two paths. A 404 from the catalog (`HttpClientErrorException.NotFound`) is still an `IllegalArgumentException` (400), so the API for a missing product does not change. Any other `RestClientException` (connection refused, timeout, 5xx) becomes `CatalogUnavailableException`, answered with 503 Service Unavailable. The original exception is kept as the cause, so the logs still show the real reason. The `NotFound` catch comes first because it is a subclass of `RestClientException`; in the opposite order it would never run.
+
+Trade-offs: any 4xx other than 404 also ends up as 503, which is a simplification. There is no retry or circuit breaker. Two unit tests with a mocked `RestTemplate` cover both paths; replacing `CatalogUnavailableException` with `IllegalArgumentException` makes the catalog-down test fail with `expected: <CatalogUnavailableException> but was: <IllegalArgumentException>`. The 503 has not been checked against a real stopped catalog-service yet.
