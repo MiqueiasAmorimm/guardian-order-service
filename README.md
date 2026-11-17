@@ -95,7 +95,7 @@ POST /orders
     "quantity": 2
 }
 ```
-Returns `201 Created` with the created order (status `AWAITING_PAYMENT`), or `400 Bad Request` if the product is not found in catalog-service.
+Returns `201 Created` with the created order (status `AWAITING_PAYMENT`), `400 Bad Request` if the product does not exist in catalog-service, or `503 Service Unavailable` if catalog-service cannot be reached.
 
 ### Update order status
 
@@ -115,7 +115,8 @@ This service communicates with **catalog-service** via REST:
 POST /orders
 → Retrieves the product and its price: GET http://localhost:8081/products/{productId}
 → Creates the order, moves it to `AWAITING_PAYMENT`, saves it and publishes `order.created` to Kafka
-→ If the product is not found: returns 400 Bad Request
+→ If the product is not found (404 from catalog-service): returns 400 Bad Request
+→ If catalog-service is unreachable or fails (connection error, 5xx): returns 503 Service Unavailable
 
 This service also uses **Apache Kafka**:
 
@@ -137,14 +138,16 @@ An approval for an order that is already `APPROVED` is ignored with a warning. O
 
 ## Known limitations
 
-- The Kafka consumer has no automated test yet. The move to `AWAITING_PAYMENT`, `ApproveOrderUseCase` and the transition rules have unit tests.
+- The Kafka consumer has no automated test yet. The move to `AWAITING_PAYMENT`, `ApproveOrderUseCase`, the transition rules and `CatalogClient` have unit tests.
 - `payment.rejected` is not consumed yet.
 - Saving the order and publishing the event are not atomic (planned: transactional outbox).
-- If catalog-service is unreachable, `POST /orders` reports it as "Product not found" (400), because any failure of the catalog call is treated as a missing product. The `RestTemplate` has no timeout or retry configured.
+- The `RestTemplate` has no connect/read timeouts, so a catalog-service that hangs (instead of being down) can still block requests.
+- The catalog call runs inside the `@Transactional` method of `CreateOrderUseCase`, holding a database connection while it waits.
+- No retry or circuit breaker for catalog-service failures. Any non-404 failure of the catalog call (including other 4xx) is reported as 503.
 
 ## Testing
 
-Unit tests implemented with JUnit 5 and Mockito, covering the use cases and the order status transition rules (13 tests):
+Unit tests implemented with JUnit 5 and Mockito, covering the use cases, the order status transition rules and the catalog client (15 tests):
 
 - `CreateOrderUseCase` — product exists (the order comes back as `AWAITING_PAYMENT`), product not found (exception), and the published `order.created` event carries the order total (price × quantity) and the currency
 - `GetOrderByIdUseCase` — order found and order not found
@@ -152,6 +155,7 @@ Unit tests implemented with JUnit 5 and Mockito, covering the use cases and the 
 - `UpdateOrderStatusUseCase` — status updated successfully and order not found
 - `ApproveOrderUseCase` — an already approved order is ignored (nothing is saved), and an order awaiting payment is approved and saved
 - `OrderStatusTransitionValidator` — allows `CREATED → AWAITING_PAYMENT` and `AWAITING_PAYMENT → APPROVED`, and refuses `CREATED → APPROVED`
+- `CatalogClient` — catalog down becomes `CatalogUnavailableException` (503), and a 404 from the catalog becomes `IllegalArgumentException` (400)
 
 Run tests:
 ```bash
