@@ -43,6 +43,8 @@ The project follows a layered architecture with clear separation of concerns:
 | `DB_USERNAME` | Database username | `guardian` |
 | `DB_PASSWORD` | Database password | `guardian` |
 | `CATALOG_SERVICE_URL` | Base URL of catalog-service | `http://localhost:8081` |
+| `CATALOG_CONNECT_TIMEOUT_MS` | Connect timeout for calls to catalog-service, in milliseconds | `2000` |
+| `CATALOG_READ_TIMEOUT_MS` | Read timeout for calls to catalog-service, in milliseconds | `5000` |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address | `localhost:9092` |
 
 ## How to Run
@@ -141,7 +143,6 @@ An approval for an order that is already `APPROVED` is ignored with a warning. O
 - The Kafka consumer has no automated test yet. The move to `AWAITING_PAYMENT`, `ApproveOrderUseCase`, the transition rules and `CatalogClient` have unit tests.
 - `payment.rejected` is not consumed yet.
 - Saving the order and publishing the event are not atomic (planned: transactional outbox).
-- The `RestTemplate` has no connect/read timeouts, so a catalog-service that hangs (instead of being down) can still block requests.
 - The catalog call runs inside the `@Transactional` method of `CreateOrderUseCase`, holding a database connection while it waits.
 - No retry or circuit breaker for catalog-service failures. Any non-404 failure of the catalog call (including other 4xx) is reported as 503.
 

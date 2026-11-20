@@ -27,7 +27,9 @@ Each microservice owns its own database. If one database goes down, only that se
 ## RestTemplate for inter-service communication
 Synchronous HTTP communication with catalog-service, used to validate that a product exists and to retrieve its price before creating an order. A synchronous call fits here because the order cannot be created without this answer. Asynchronous communication with payment-service goes through Kafka, so the two mechanisms coexist.
 
-Trade-off: when catalog-service is down, the failure is reported as 503 and no longer as a missing product (see "Telling Product Not Found Apart from Catalog Unavailable"). The `RestTemplate` still has no timeouts, so a catalog-service that hangs instead of being down can block requests, and the call still runs inside the `@Transactional` method of `CreateOrderUseCase`.
+The `RestTemplate` is built from `RestTemplateBuilder` with a connect timeout (2 s) and a read timeout (5 s), configurable through `catalog.service.connect-timeout-ms` and `catalog.service.read-timeout-ms` (environment variables `CATALOG_CONNECT_TIMEOUT_MS` and `CATALOG_READ_TIMEOUT_MS`). A timeout raises `ResourceAccessException`, which `CatalogClient` turns into `CatalogUnavailableException` (503), so a catalog-service that hangs no longer holds the request. It was checked by pointing `CATALOG_SERVICE_URL` at an address that does not answer: 503 after about 2.4 s, instead of waiting for the operating system to give up.
+
+Trade-off: when catalog-service is down, the failure is reported as 503 and no longer as a missing product (see "Telling Product Not Found Apart from Catalog Unavailable"). The values (2 s and 5 s) are a first guess, not measured. The call still runs inside the `@Transactional` method of `CreateOrderUseCase`, so a slow catalog-service still holds a database connection for up to the timeout. There is no retry or circuit breaker.
 
 ## ResourceNotFoundException returns 404
 Custom exception that extends RuntimeException. Used when a resource does not exist — returns 404 Not Found instead of the generic 400 Bad Request.
